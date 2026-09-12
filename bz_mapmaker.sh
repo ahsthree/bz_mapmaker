@@ -11,7 +11,7 @@ cleanup_test_group() {
     local mapfile="$1"
     local groupname="$2"
     if [ -f "$mapfile" ]; then
-        # Delete from 'group <name>' down to 'end'
+        # Delete temporary test group block from 'group <name>' down to 'end'
         sed -i "/^group ${groupname}$/,/^end$/d" "$mapfile"
     fi
 }
@@ -49,7 +49,7 @@ if grep -q "^# IN_PROGRESS_DEFINE:" "$mapfile"; then
     echo ">> Resuming object creation loop..."
 fi
 
-# 2. Options Block Setup
+# 2. Options Block Setup (Skipped if file already has an options block)
 if grep -q "^options" "$mapfile"; then
     echo "Existing options block detected in $mapfile. Skipping options entry."
 else
@@ -81,13 +81,14 @@ fi
 while true; do
     if [ -n "$resumed_define" ]; then
         definename="$resumed_define"
-        resumed_define=""
+        resumed_define="" # Reset so subsequent loops prompt normally
     else
         echo ""
         read -p "Enter DEFINE name (or 'quit' to exit): " definename
         [[ "$definename" == "quit" || -z "$definename" ]] && break
     fi
 
+    # Ensure define block exists and mark it as active with a comment tag
     if ! grep -q "^define $definename" "$mapfile"; then
         echo -e "\n# IN_PROGRESS_DEFINE: $definename\ndefine $definename\nenddef #$definename" >> "$mapfile"
     elif ! grep -q "^# IN_PROGRESS_DEFINE: $definename" "$mapfile"; then
@@ -134,7 +135,7 @@ while true; do
 
         read -p "Keep this object? [Y/n]: " keep_obj
         if [[ "$keep_obj" =~ ^[Nn]$ ]]; then
-            # Delete whole block from 'box' or 'pyramid' down to 'end' matching pos
+            # Cleanly remove exact header block (box/pyramid down to end matching pos)
             sed -i "/^${obj_name}$/,/^end$/{ /^  pos $x $y $z$/!b; d; }" "$mapfile" 2>/dev/null || \
             python3 -c "
 import sys, re
@@ -153,6 +154,7 @@ with open(path, 'w') as f:
 
         read -p "Finish and close define '$definename'? [y/N]: " close_def
         if [[ "$close_def" =~ ^[Yy]$ ]]; then
+            # Remove state tag when closing out define block
             sed -i "/^# IN_PROGRESS_DEFINE: $definename$/d" "$mapfile"
 
             echo "------------------------------------------"
@@ -163,7 +165,46 @@ with open(path, 'w') as f:
             read -p "Group Rotation (grot) [default: 0]: " grot
             grot=${grot:-0}
 
+            # Append permanent group block
             echo -e "\ngroup $definename\n  rot $grot\n  shift $gx $gy $gz\nend" >> "$mapfile"
+            echo "Permanent group '$definename' added at ($gx, $gy, $gz) rot: $grot"
+
+            # Test permanent placement loop
+            read -p "Test permanent group placement in bzfs now? [Y/n]: " test_perm
+            if [[ ! "$test_perm" =~ ^[Nn]$ ]]; then
+                echo "------------------------------------------"
+                echo "Launching bzfs to test permanent placement..."
+                echo "Press Ctrl+C or exit server when done."
+                echo "------------------------------------------"
+                bzfs -world "$mapfile"
+
+                read -p "Is the permanent group placement correct? [Y/n]: " perm_ok
+                if [[ "$perm_ok" =~ ^[Nn]$ ]]; then
+                    # Delete newly appended permanent group block
+                    sed -i "/^group ${definename}$/,/^end$/{ /^  shift $gx $gy $gz$/!b; d; }" "$mapfile" 2>/dev/null || \
+                    python3 -c "
+import sys, re
+path = '$mapfile'
+with open(path, 'r') as f:
+    text = f.read()
+pattern = r'group ${definename}\s*\n\s*rot $grot\s*\n\s*shift $gx $gy $gz\s*\nend\n?'
+text = re.sub(pattern, '', text, count=1)
+with open(path, 'w') as f:
+    f.write(text)
+"
+                    echo "Permanent group placement removed. Re-prompting for placement..."
+                    
+                    # Re-prompt for updated coordinates and rotation
+                    read -p "New Group Position (gx gy gz) [default: 0 0 0]: " gx gy gz
+                    gx=${gx:-0}; gy=${gy:-0}; gz=${gz:-0}
+
+                    read -p "New Group Rotation (grot) [default: 0]: " grot
+                    grot=${grot:-0}
+
+                    echo -e "\ngroup $definename\n  rot $grot\n  shift $gx $gy $gz\nend" >> "$mapfile"
+                    echo "Updated permanent group placement saved."
+                fi
+            fi
             break
         fi
     done
