@@ -11,6 +11,7 @@ cleanup_test_group() {
     local mapfile="$1"
     local groupname="$2"
     if [ -f "$mapfile" ]; then
+        # Delete from 'group <name>' down to 'end'
         sed -i "/^group ${groupname}$/,/^end$/d" "$mapfile"
     fi
 }
@@ -48,7 +49,7 @@ if grep -q "^# IN_PROGRESS_DEFINE:" "$mapfile"; then
     echo ">> Resuming object creation loop..."
 fi
 
-# 2. Options Block Setup (Skipped if file already has an options block)
+# 2. Options Block Setup
 if grep -q "^options" "$mapfile"; then
     echo "Existing options block detected in $mapfile. Skipping options entry."
 else
@@ -80,18 +81,16 @@ fi
 while true; do
     if [ -n "$resumed_define" ]; then
         definename="$resumed_define"
-        resumed_define="" # Reset so subsequent loops prompt normally
+        resumed_define=""
     else
         echo ""
         read -p "Enter DEFINE name (or 'quit' to exit): " definename
         [[ "$definename" == "quit" || -z "$definename" ]] && break
     fi
 
-    # Ensure define block exists and mark it as active with a comment tag
     if ! grep -q "^define $definename" "$mapfile"; then
         echo -e "\n# IN_PROGRESS_DEFINE: $definename\ndefine $definename\nenddef #$definename" >> "$mapfile"
     elif ! grep -q "^# IN_PROGRESS_DEFINE: $definename" "$mapfile"; then
-        # Add state tag above existing define
         sed -i "/^define $definename/i # IN_PROGRESS_DEFINE: $definename" "$mapfile"
     fi
 
@@ -135,15 +134,25 @@ while true; do
 
         read -p "Keep this object? [Y/n]: " keep_obj
         if [[ "$keep_obj" =~ ^[Nn]$ ]]; then
-            sed -i "/^  pos $x $y $z$/,/^end$/d" "$mapfile"
-            echo "Object removed."
+            # Delete whole block from 'box' or 'pyramid' down to 'end' matching pos
+            sed -i "/^${obj_name}$/,/^end$/{ /^  pos $x $y $z$/!b; d; }" "$mapfile" 2>/dev/null || \
+            python3 -c "
+import sys, re
+path = '$mapfile'
+with open(path, 'r') as f:
+    text = f.read()
+pattern = r'${obj_name}\s*\n\s*pos $x $y $z\s*\n\s*size $xs $ys $zs\s*\n\s*rot $rot\s*\nend\n?'
+text = re.sub(pattern, '', text, count=1)
+with open(path, 'w') as f:
+    f.write(text)
+"
+            echo "Object removed cleanly."
         else
             echo "Object saved to define."
         fi
 
         read -p "Finish and close define '$definename'? [y/N]: " close_def
         if [[ "$close_def" =~ ^[Yy]$ ]]; then
-            # Remove the state tag when closing out the define block
             sed -i "/^# IN_PROGRESS_DEFINE: $definename$/d" "$mapfile"
 
             echo "------------------------------------------"
@@ -161,7 +170,6 @@ while true; do
 
     read -p "Is the map complete? [y/N]: " map_done
     if [[ "$map_done" =~ ^[Yy]$ ]]; then
-        # Clean up any lingering tracking tags
         sed -i "/^# IN_PROGRESS_DEFINE:/d" "$mapfile"
         break
     fi
