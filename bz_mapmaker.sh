@@ -179,32 +179,34 @@ with open(path, 'w') as f:
             # Remove state tag when closing out define block
             sed -i "/^# IN_PROGRESS_DEFINE: $definename$/d" "$mapfile"
 
-            echo "------------------------------------------"
-            echo "Placing permanent group instance for '$definename'..."
-            read -p "Group Position (gx gy gz) [default: 0 0 0]: " gx gy gz
-            gx=${gx:-0}; gy=${gy:-0}; gz=${gz:-0}
-
-            read -p "Group Rotation (grot) [default: 0]: " grot
-            grot=${grot:-0}
-
-            # Append permanent group block
-            echo -e "\ngroup $definename\n  rot $grot\n  shift $gx $gy $gz\nend" >> "$mapfile"
-            echo "Permanent group '$definename' added at ($gx, $gy, $gz) rot: $grot"
-
-            # Test permanent placement loop
-            read -p "Test permanent group placement in bzfs now? [Y/n]: " test_perm
-            if [[ ! "$test_perm" =~ ^[Nn]$ ]]; then
+            # Group Placement Loop (Allows placing single or multiple duplicate instances)
+            while true; do
                 echo "------------------------------------------"
-                echo "Launching bzfs to test permanent placement..."
-                echo "Press Ctrl+C or exit server when done."
-                echo "------------------------------------------"
-                bzfs -world "$mapfile"
+                echo "Placing group instance for '$definename'..."
+                read -p "Group Position (gx gy gz) [default: 0 0 0]: " gx gy gz
+                gx=${gx:-0}; gy=${gy:-0}; gz=${gz:-0}
 
-                read -p "Is the permanent group placement correct? [Y/n]: " perm_ok
-                if [[ "$perm_ok" =~ ^[Nn]$ ]]; then
-                    # Delete newly appended permanent group block
-                    sed -i "/^group ${definename}$/,/^end$/{ /^  shift $gx $gy $gz$/!b; d; }" "$mapfile" 2>/dev/null || \
-                    python3 -c "
+                read -p "Group Rotation (grot) [default: 0]: " grot
+                grot=${grot:-0}
+
+                # Append group block
+                echo -e "\ngroup $definename\n  rot $grot\n  shift $gx $gy $gz\nend" >> "$mapfile"
+                echo "Group '$definename' added at ($gx, $gy, $gz) rot: $grot"
+
+                # Test placement loop
+                read -p "Test group placement in bzfs now? [Y/n]: " test_perm
+                if [[ ! "$test_perm" =~ ^[Nn]$ ]]; then
+                    echo "------------------------------------------"
+                    echo "Launching bzfs to test group placement..."
+                    echo "Press Ctrl+C or exit server when done."
+                    echo "------------------------------------------"
+                    bzfs -world "$mapfile"
+
+                    read -p "Is this group placement correct? [Y/n]: " perm_ok
+                    if [[ "$perm_ok" =~ ^[Nn]$ ]]; then
+                        # Delete newly appended group block
+                        sed -i "/^group ${definename}$/,/^end$/{ /^  shift $gx $gy $gz$/!b; d; }" "$mapfile" 2>/dev/null || \
+                        python3 -c "
 import sys, re
 path = '$mapfile'
 with open(path, 'r') as f:
@@ -214,19 +216,22 @@ text = re.sub(pattern, '', text, count=1)
 with open(path, 'w') as f:
     f.write(text)
 "
-                    echo "Permanent group placement removed. Re-prompting for placement..."
-                    
-                    # Re-prompt for updated coordinates and rotation
-                    read -p "New Group Position (gx gy gz) [default: 0 0 0]: " gx gy gz
-                    gx=${gx:-0}; gy=${gy:-0}; gz=${gz:-0}
-
-                    read -p "New Group Rotation (grot) [default: 0]: " grot
-                    grot=${grot:-0}
-
-                    echo -e "\ngroup $definename\n  rot $grot\n  shift $gx $gy $gz\nend" >> "$mapfile"
-                    echo "Updated permanent group placement saved."
+                        echo "Group placement removed."
+                        read -p "Try placing this instance again? [Y/n]: " retry_inst
+                        if [[ "$retry_inst" =~ ^[Nn]$ ]]; then
+                            break
+                        else
+                            continue
+                        fi
+                    fi
                 fi
-            fi
+
+                # Duplicate prompt
+                read -p "Place another duplicate instance of '$definename' in a different location? [y/N]: " add_dup
+                if [[ ! "$add_dup" =~ ^[Yy]$ ]]; then
+                    break
+                fi
+            done
             break
         fi
     done
