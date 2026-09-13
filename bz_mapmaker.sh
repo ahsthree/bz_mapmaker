@@ -116,7 +116,29 @@ while true; do
         read -p "Rotation (rot) [default: 0]: " rot
         rot=${rot:-0}
 
-        obj_block="${obj_name}\n  pos $x $y $z\n  size $xs $ys $zs\n  rot $rot\nend"
+        # Build object body parameters
+        extra_flags=""
+
+        # Pyramid-specific flipz flag
+        if [ "$obj_name" == "pyramid" ]; then
+            read -p "Flip Z orientation? [f=flipz, x=none, default: x]: " flipz_choice
+            if [[ "$flipz_choice" =~ ^[Ff]$ ]]; then
+                extra_flags="${extra_flags}\n  flipz"
+            fi
+        fi
+
+        # Passability / Physics Flag (Mutually exclusive: 1 max)
+        echo "Select passability flag:"
+        read -p "[d=drivethrough, s=shootthrough, p=passable, x=none, default: x]: " pass_choice
+
+        case "$pass_choice" in
+            d|D) extra_flags="${extra_flags}\n  drivethrough" ;;
+            s|S) extra_flags="${extra_flags}\n  shootthrough" ;;
+            p|P) extra_flags="${extra_flags}\n  passable" ;;
+            *) ;; # None selected
+        esac
+
+        obj_block="${obj_name}\n  pos $x $y $z\n  size $xs $ys $zs\n  rot $rot${extra_flags}\nend"
 
         # Insert object right above 'enddef #definename'
         sed -i "/^enddef #$definename/i $obj_block" "$mapfile"
@@ -142,8 +164,8 @@ import sys, re
 path = '$mapfile'
 with open(path, 'r') as f:
     text = f.read()
-pattern = r'${obj_name}\s*\n\s*pos $x $y $z\s*\n\s*size $xs $ys $zs\s*\n\s*rot $rot\s*\nend\n?'
-text = re.sub(pattern, '', text, count=1)
+pattern = r'${obj_name}\s*\n\s*pos $x $y $z\s*\n.*?\nend\n?'
+text = re.sub(pattern, '', text, count=1, flags=re.DOTALL)
 with open(path, 'w') as f:
     f.write(text)
 "
